@@ -33,4 +33,21 @@ class TestInsert < Test::Unit::TestCase
     assert_equal [3058,0,0], pp.debug.data[0,3]
     File.delete("db3")
   end
+
+  def test_inserting_decending
+    pp = PagesAllocator.new "db4"
+    arr = (1..3058).to_a.reverse
+    arr.each { |i| pp.insert i }
+    assert_equal [1,0,0], pp.debug.data[0,3]
+    File.delete("db4")
+  end
+
+  def test_inserting_mixed
+    pp = PagesAllocator.new "db5"
+    arr = (1..5000).to_a.reverse
+    arr += (5001..8000).to_a
+    arr.each { |i| pp.insert i }
+    assert_equal (1..8000).to_a, pp.traverse
+    File.delete("db5")
+  end
 end
