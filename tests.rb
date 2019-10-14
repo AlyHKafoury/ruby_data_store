@@ -28,26 +28,40 @@ class TestInsert < Test::Unit::TestCase
 
   def test_new_page_allocation_at_end
     pp = PagesAllocator.new "db3"
-    arr = (1..3058).to_a
+    arr = (1..30).to_a
     arr.each { |i| pp.insert i }
-    assert_equal [3058,0,0], pp.debug.data[0,3]
+    assert_equal arr, pp.traverse
     File.delete("db3")
   end
 
   def test_inserting_decending
     pp = PagesAllocator.new "db4"
-    arr = (1..3058).to_a.reverse
+    arr = (1..30).to_a.reverse
     arr.each { |i| pp.insert i }
-    assert_equal [1,0,0], pp.debug.data[0,3]
+    assert_equal arr.reverse, pp.traverse
     File.delete("db4")
   end
 
   def test_inserting_mixed
     pp = PagesAllocator.new "db5"
-    arr = (1..5000).to_a.reverse
-    arr += (5001..8000).to_a
+    arr = (1..50).to_a.reverse
+    arr += (51..80).to_a
     arr.each { |i| pp.insert i }
-    assert_equal (1..8000).to_a, pp.traverse
+    assert_equal (1..80).to_a, pp.traverse
     File.delete("db5")
+  end
+
+  def test_insert_random
+    pa = PagesAllocator.new "db6"
+    items = []
+    (1..40).each do |i|
+      item = rand(1..2000)
+      items << item
+      pa.insert item
+    end
+    items.sort!
+    #puts items.join(',')
+    assert_equal items, pa.traverse
+    File.delete("db6")
   end
 end
