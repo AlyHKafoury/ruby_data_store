@@ -103,8 +103,8 @@ class PagesAllocator
           $logger.logs "==================================== #{old_page.next_page}"
           $logger.logs "==================================== #{@current_page.next_page}"
           old_page.split_data_with @current_page
-          old_page.save @file
           save_current_page
+          old_page.save @file
           load_page 0
           $logger.logs "current id #{@current_page.id}"
           $logger.logs "current max #{@current_page.max}"
