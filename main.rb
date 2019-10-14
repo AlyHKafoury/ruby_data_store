@@ -1,7 +1,7 @@
 require_relative 'logger'
 MAX_SIZE = (2**32) - 1
-ITEMS_IN_PAGE = 10
-PAGE_SIZE = 60
+ITEMS_IN_PAGE = 1019
+PAGE_SIZE = 4096
 
 $logger = Logger.new
 
@@ -117,7 +117,7 @@ class PagesAllocator
         $logger.logs "loading next page #{@current_page.id}"
         next
       end
-      if item < @current_page.min && !current_is_first_page?
+      if item <= @current_page.min && !current_is_first_page?
         load_page 0 
         $logger.logs "loading first page"
         next
