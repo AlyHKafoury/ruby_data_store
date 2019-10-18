@@ -1,7 +1,8 @@
 require_relative 'logger'
 MAX_SIZE = (2**32) - 1
-ITEMS_IN_PAGE = 1019
-PAGE_SIZE = 4096
+ITEMS_IN_PAGE = 509
+PAGE_SIZE = ITEMS_IN_PAGE * 8 + 24
+PADDING = 4096 - PAGE_SIZE
 
 $logger = Logger.new
 
@@ -26,13 +27,13 @@ class PagesAllocator
     keys = []
     load_page 0
     while @current_page.next_page != 0
-      @current_page.data.each do |j|
+      @current_page.keys.each do |j|
         next if j == 0 
         keys << j
       end
       load_page @current_page.next_page
     end
-    @current_page.data.each do |j|
+    @current_page.keys.each do |j|
       next if j == 0 
       keys << j
     end
@@ -79,14 +80,14 @@ class PagesAllocator
       $logger.logs "current min #{@current_page.min}"
       $logger.logs "current data_size #{@current_page.data_size}"
       $logger.logs "current is last #{current_is_last_page?}"
-      if (item <= @current_page.max && item > @current_page.min) ||
-         (current_is_last_page? && item >= @current_page.max) ||
-         (current_is_first_page? && item <= @current_page.min) ||
-         (item >= @current_page.max && item <= next_page.min)
-        $logger.logs '(item <= @current_page.max && item > @current_page.min)' if (item <= @current_page.max && item > @current_page.min)
-        $logger.logs '(current_is_last_page? && item >= @current_page.max)' if (current_is_last_page? && item >= @current_page.max)
-        $logger.logs '(current_is_first_page? && item <= @current_page.min)' if (current_is_first_page? && item <= @current_page.min)
-        $logger.logs '(item >= @current_page.max && item <= next_page.min)' if (item >= @current_page.max && item <= next_page.min)
+      if (item.key <= @current_page.max && item.key > @current_page.min) ||
+         (current_is_last_page? && item.key >= @current_page.max) ||
+         (current_is_first_page? && item.key <= @current_page.min) ||
+         (item.key >= @current_page.max && item.key <= next_page.min)
+        $logger.logs '(item <= @current_page.max && item > @current_page.min)' if (item.key <= @current_page.max && item.key > @current_page.min)
+        $logger.logs '(current_is_last_page? && item >= @current_page.max)' if (current_is_last_page? && item.key >= @current_page.max)
+        $logger.logs '(current_is_first_page? && item <= @current_page.min)' if (current_is_first_page? && item.key <= @current_page.min)
+        $logger.logs '(item >= @current_page.max && item <= next_page.min)' if (item.key >= @current_page.max && item.key <= next_page.min)
         if @current_page.data_size < ITEMS_IN_PAGE
           @current_page.insert(item)
           # $logger.logs "THIS IS THE ERROR CURRENT PAGE ID: #{@current_page.id}"
@@ -112,12 +113,12 @@ class PagesAllocator
           next
         end
       end
-      if item > @current_page.max
+      if item.key > @current_page.max
         load_page @current_page.next_page
         $logger.logs "loading next page #{@current_page.id}"
         next
       end
-      if item <= @current_page.min && !current_is_first_page?
+      if item.key <= @current_page.min && !current_is_first_page?
         load_page 0 
         $logger.logs "loading first page"
         next
@@ -150,7 +151,7 @@ class PagesAllocator
     @current_page.max = @page_raw[2]
     @current_page.min = @page_raw[3]
     @current_page.id = @page_raw[4]
-    @current_page.data = @page_raw[5..-1]
+    @current_page.bytes_to_items @page_raw[6..-1]
   end
 
   # Loads a specific page
@@ -160,7 +161,7 @@ class PagesAllocator
     page.max = @page_raw[2]
     page.min = @page_raw[3]
     page.id = @page_raw[4]
-    page.data = @page_raw[5..-1]
+    page.bytes_to_items @page_raw[6..-1]
   end
 
   # find if the current page is the last one
@@ -173,17 +174,67 @@ class PagesAllocator
   end
 end
 
+class Item
+  attr_accessor :key, :value
+  def initialize(key, value)
+    @key = key
+    @value = value
+  end
+
+  def to_s
+    "#{@key}, #{@value}"
+  end
+
+  def to_str
+    "#{@key}, #{@value}"
+  end
+end
+
 class Page
-  attr_accessor :data, :next_page, :max, :min, :data_size, :id
+  attr_accessor :items, :next_page, :max, :min, :data_size, :id
   def initialize
-    @data = Array.new(ITEMS_IN_PAGE, 0)
     @next_page = 0
     @max = 0
     @min = MAX_SIZE-1
     @data_size = 0
     @id = 0
+    @items = Array.new ITEMS_IN_PAGE, Item.new(0, 0)
   end
 
+  #get all keys
+  def keys
+    keys = []
+    @items.each do |item|
+      keys << item.key
+    end
+    keys
+  end
+
+  #get all values
+  def values
+    values = []
+    @items.each do |item|
+      values << item.value
+    end
+    values
+  end
+
+  #Load data into keypairs
+  def bytes_to_items(raw_data)
+    (0...raw_data.length).step(2).each do |i|
+      @items[i/2] = Item.new raw_data[i], raw_data[i+1]
+    end
+  end
+
+  #turns items into a byte array
+  def items_to_bytes
+    bytes = []
+    @items.each do |item|
+      bytes << item.key
+      bytes << item.value
+    end
+    bytes
+  end
   # saves current page
   def save(file)
     file.sysseek @id * PAGE_SIZE, IO::SEEK_SET
@@ -191,53 +242,54 @@ class Page
   end
 
   def debug
-    $logger.logs @data
+    $logger.logs @items
   end
 
   def split_data_with(other_page)
     new_page_counter = 0
     ((@data_size/2).floor..@data_size-1).each do |i|
-      other_page.data[new_page_counter] = @data[i]
-      @data[i] = 0
+      other_page.items[new_page_counter] = @items[i]
+      @items[i] = Item.new 0, 0 
       new_page_counter += 1
     end
     other_page.data_size = (@data_size/2.0).ceil
     @data_size = (@data_size/2).floor
-    other_page.max = other_page.data[new_page_counter-1]
-    other_page.min = other_page.data[0]
-    @max = @data[@data_size-1]
-    @min = @data[0]
+    other_page.max = other_page.items[new_page_counter-1].key
+    other_page.min = other_page.items[0].key
+    @max = @items[@data_size-1].key
+    @min = @items[0].key
   end
 
   # seralize the page data to a bytes array
   def to_bytes
-    all_data = [@data_size, @next_page, @max, @min, @id] + @data
+    data = items_to_bytes
+    all_data = [@data_size, @next_page, @max, @min, @id, 0] + data
     $logger.logs [:data_size, @data_size, :next_page , @next_page, :max, @max, :min, @min, :id, @id].join(",")
-    $logger.logs "data: #{@data.join(",")}"
+    $logger.logs "data: #{data.join(",")}"
     all_data.pack('L*')
   end
 
-  # Insert value in the correct place in the data array
-  def insert(value)
+  # Insert item in the correct place in the data array
+  def insert(item)
     temp = 0
     push_index = 0
     # Yes I can use binary search here alot faster
-    @data.each_index do |i| 
-      if @data[i] <= value && i < @data_size
+    @items.each_index do |i| 
+      if @items[i].key <= item.key && i < @data_size
         next
       end
-      temp = @data[i]
-      @data[i] = value
+      temp = @items[i]
+      @items[i] = item
       push_index = i+1
       break
     end
     (push_index..ITEMS_IN_PAGE-1).each do |i|
-      local_temp = @data[i]
-      @data[i] = temp
+      local_temp = @items[i]
+      @items[i] = temp
       temp = local_temp
     end
-    @max = value if value > max
-    @min = value if value < min
+    @max = item.key if item.key > max
+    @min = item.key if item.key < min
     @data_size += 1
     # $logger.logs "DEBUGGING THE OFF BY ONE BYTE ERROR OMG: #{@id}"
   end
@@ -245,10 +297,14 @@ end
 
 if __FILE__ == $0
   pp = PagesAllocator.new "db6"
-  pp.load_page 0
-  $logger.logs "raw :" + pp.page_raw[0,5].join(",")
-  $logger.logs pp.debug.data.join ","
-  $logger.logs pp.debug.next_page
+  pp.load_page 4
+  puts pp.debug.id
+  puts pp.debug.data_size
+  puts pp.debug.next_page
+  puts pp.debug.max
+  puts pp.debug.min
+  puts pp.debug.items_to_bytes.size
+  puts pp.debug.items_to_bytes.join(",")
 end
 
 # $logger.logs "data_size:", pp.debug.data_size
